@@ -125,15 +125,20 @@ DEBUG_LOG="$WP_ROOT/wp-content/debug.log"
 
 if [[ -f "$DEBUG_LOG" ]]; then
     LOG_SIZE=$(du -sh "$DEBUG_LOG" 2>/dev/null | cut -f1)
+    LOG_LINES=$(wc -l < "$DEBUG_LOG" 2>/dev/null || echo "0")
     ok "debug.log exists (size: $LOG_SIZE)"
-    echo ""
-    echo -e "  ${BOLD}Last 20 entries:${RESET}"
-    echo "  ─────────────────────────────────"
-    tail -20 "$DEBUG_LOG" | while IFS= read -r line; do
-        echo "  $line"
-    done
-    found "Active debug.log — review errors above."
-    recommend "Identify the plugin or theme causing the error from the file path in the log."
+    if [[ "$LOG_LINES" -gt 0 ]]; then
+        echo ""
+        echo -e "  ${BOLD}Last 20 entries:${RESET}"
+        echo "  ─────────────────────────────────"
+        tail -20 "$DEBUG_LOG" | while IFS= read -r line; do
+            echo "  $line"
+        done
+        found "Active debug.log with $LOG_LINES line(s) — review errors above."
+        recommend "Identify the plugin or theme causing the error from the file path in the log."
+    else
+        ok "debug.log is empty — no errors currently logged."
+    fi
 else
     warn "debug.log not found. WP_DEBUG_LOG may be disabled."
     recommend "Add to wp-config.php: define('WP_DEBUG', true); define('WP_DEBUG_LOG', true); define('WP_DEBUG_DISPLAY', false);"
@@ -149,6 +154,16 @@ MAX_MEMORY=$(grep "WP_MAX_MEMORY_LIMIT" "$WP_ROOT/wp-config.php" 2>/dev/null || 
 
 if [[ -n "$WP_MEMORY" ]]; then
     ok "WP_MEMORY_LIMIT defined: $WP_MEMORY"
+    # Extract numeric value to check if it is dangerously low
+    MEM_VALUE=$(echo "$WP_MEMORY" | grep -oP "['\"]\K[0-9]+" 2>/dev/null || echo "0")
+    MEM_UNIT=$(echo "$WP_MEMORY" | grep -oP "[0-9]+\K[MmGg]" 2>/dev/null || echo "M")
+    if [[ "${MEM_UNIT,,}" == "m" && "$MEM_VALUE" -gt 0 && "$MEM_VALUE" -lt 128 ]]; then
+        found "WP_MEMORY_LIMIT is set too low (${MEM_VALUE}M) — likely cause of 500 errors on multi-plugin sites."
+        recommend "Increase to at least 256M: define('WP_MEMORY_LIMIT', '256M');"
+    elif [[ "${MEM_UNIT,,}" == "m" && "$MEM_VALUE" -gt 0 && "$MEM_VALUE" -lt 256 ]]; then
+        warn "WP_MEMORY_LIMIT (${MEM_VALUE}M) is below the recommended 256M for production sites."
+        recommend "Consider increasing: define('WP_MEMORY_LIMIT', '256M');"
+    fi
 else
     warn "WP_MEMORY_LIMIT not explicitly set in wp-config.php (WordPress default: 40M)."
     recommend "Add to wp-config.php: define('WP_MEMORY_LIMIT', '256M');"
